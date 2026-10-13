@@ -1,5 +1,8 @@
 """Assignment 1 - training pipeline (step 1: split and cleaning)."""
+import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 DATA_PATH = "data/ames.csv"
 
@@ -74,6 +77,26 @@ def encode_quality(df):
         df[col] = df[col].map(QUALITY_MAP)
     return df
 
+TARGET = "SalePrice"
+
+
+def split_xy(df):
+    """Separate the features (X) from the target (y)."""
+    X = df.drop(columns=[TARGET]).copy()
+    X["MSSubClass"] = X["MSSubClass"].astype(str)  # numeric code, but really a category
+    return X, df[TARGET]
+
+
+def fit_preprocessor(X_train):
+    """Learn the scaling and one-hot encoding from TRAIN only."""
+    cat_cols = X_train.select_dtypes(exclude="number").columns.tolist()
+    num_cols = X_train.select_dtypes(include="number").columns.tolist()
+    pre = ColumnTransformer([
+        ("num", StandardScaler(), num_cols),
+        ("cat", OneHotEncoder(drop="first", handle_unknown="ignore", sparse_output=False), cat_cols),
+    ])
+    return pre.fit(X_train)
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
@@ -81,8 +104,8 @@ if __name__ == "__main__":
     train, val, test = (apply_cleaning(d, stats) for d in (train, val, test))
     train, val, test = (engineer_features(d) for d in (train, val, test))
     train, val, test = (encode_quality(d) for d in (train, val, test))
-    for name, d in (("train", train), ("val", val), ("test", test)):
-        na = d.isna().sum()
-        print(name, "remaining missing:", na[na > 0].to_dict())
-    print("columns (incl. SalePrice):", train.shape[1])
-    print("KitchenQual values:", sorted(train["KitchenQual"].unique().tolist()))
+    (X_train, y_train), (X_val, y_val), (X_test, y_test) = (split_xy(d) for d in (train, val, test))
+    pre = fit_preprocessor(X_train)
+    A_train, A_val, A_test = (pre.transform(X) for X in (X_train, X_val, X_test))
+    print("model matrices:", A_train.shape, A_val.shape, A_test.shape)
+    print("any NaN:", bool(np.isnan(A_train).any() or np.isnan(A_val).any() or np.isnan(A_test).any()))
