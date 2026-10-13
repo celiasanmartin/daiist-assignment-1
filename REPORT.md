@@ -10,16 +10,22 @@ can actually explain.*
 - **Group**: [BBADBA 5A | BBADBA 5B | PPLEDBA 5A | BDBA 3A]
 
 ## Dataset
+I used the Ames Housing dataset. 
+It contains residential home sales in Ames, Iowa, from 2006 to  2010. I downloaded it from OpenML (dataset id 42165, the training set of Kaggle's "House Prices" competition) using scikit-learn's `fetch_openml` and saved it as `data/ames.csv`.
 
-*What is it, where did you get it, what does one row represent, how many
-rows/columns, and why did you pick it.*
+Each row represents one house sale. The dataset has 1,460 rows and 81 columns: 79 describe the house (size, overall quality, neighbourhood, year built, garage, etc.), plus an `Id` column and the target, `SalePrice`.
+
+I picked it because housing is kind of a trending topic nowadays in Spain mainly and lately i have read a lot about it
 
 ## Business / real-life framing
 
-*The hypothetical scenario this model serves, and what that scenario implies
-for how you built the pipeline — target definition, whether a time-based
-split was necessary and why (or why not), which metric should drive the
-decision threshold and why.*
+**Scenario.** A retail bank uses the model as a second opinion on property valuations when assessing a mortgage application: if the model's estimate and the appraised value differ a lot, the application is flagged for review.
+
+**Target.** The model predicts `SalePrice` directly, in dollars, rather than its logarithm. I chose this so that the RMSE is expressed in dollars, which is easy for the bank to interpret. The trade-off is that `SalePrice` is right-skewed (skewness of about 1.9), so a few expensive houses can pull the linear model; I discuss this in the limitations.
+
+**Split.** Because the bank would value houses sold after the model is built, I split the data by sale year instead of randomly: the model is trained on earlier years and tested on the most recent ones. A random split would be misleading because test houses would be sold in the same years as many training houses, so the model would be evaluated on a market it has already seen, while in practice the bank would value houses sold after the model was built. This would make the reported error lower than the real one.
+
+**Metric.** I assume that overvaluing and undervaluing a house cost the bank a similar amount [your reason: for example, losing customers vs. default risk], so I do not need an asymmetric error. I use RMSE as the main metric because it penalises large errors more heavily, and large valuation mistakes are the ones that matter most for this decisionnnnn
 
 ## Data preparation & feature engineering
 
