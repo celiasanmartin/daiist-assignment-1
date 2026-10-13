@@ -1,5 +1,10 @@
 """Assignment 1 - training pipeline (step 1: split and cleaning)."""
 import numpy as np
+import json
+from pathlib import Path
+
+import joblib
+import numpy as np
 import pandas as pd
 import torch
 from torch import nn
@@ -179,6 +184,25 @@ def predict_module(model, A):
     with torch.no_grad():
         return model(torch.tensor(A, dtype=torch.float32)).numpy().ravel()
 
+ARTIFACT_DIR = Path("artifacts")
+
+
+def mae(y_true, y_pred):
+    """Mean absolute error, in dollars."""
+    return float(np.mean(np.abs(np.asarray(y_true) - np.asarray(y_pred))))
+
+
+def save_artifacts(pre, sk_model, w_man, b_man, nn_model, meta, predictions, results):
+    """Save everything the dashboard needs, so app.py never has to retrain."""
+    ARTIFACT_DIR.mkdir(exist_ok=True)
+    joblib.dump(pre, ARTIFACT_DIR / "preprocessor.joblib")
+    joblib.dump(sk_model, ARTIFACT_DIR / "sklearn_ridge.joblib")
+    torch.save({"w": w_man, "b": b_man}, ARTIFACT_DIR / "manual_pytorch.pt")
+    torch.save(nn_model.state_dict(), ARTIFACT_DIR / "nn_module.pt")
+    (ARTIFACT_DIR / "metadata.json").write_text(json.dumps(meta, indent=2))
+    predictions.to_csv(ARTIFACT_DIR / "predictions.csv", index=False)
+    results.to_csv(ARTIFACT_DIR / "results.csv", index=False)
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
@@ -221,4 +245,39 @@ if __name__ == "__main__":
     nn_val = rmse(y_val, predict_module(nn_model, A_val) * y_std + y_mean)
     nn_test = rmse(y_test, predict_module(nn_model, A_test) * y_std + y_mean)
     print("nn.Module       val: %.0f  test: %.0f" % (nn_val, nn_test))
+
+    # Predictions of the three models (in dollars) on validation and test
+    predictions = pd.concat([
+        pd.DataFrame({
+            "split": name,
+            "actual": y.to_numpy(),
+            "sklearn": sk_model.predict(A) * y_std + y_mean,
+            "manual": predict_linear(A, w_man, b_man) * y_std + y_mean,
+            "nn_module": predict_module(nn_model, A) * y_std + y_mean,
+        })
+        for name, A, y in (("val", A_val, y_val), ("test", A_test, y_test))
+    ], ignore_index=True)
+    p_val = predictions[predictions["split"] == "val"]
+    p_test = predictions[predictions["split"] == "test"]
+
+    # Comparison table: three methods vs the naive baseline
+    results = pd.DataFrame({"model": ["baseline (mean price)", "scikit-learn Ridge", "manual PyTorch", "nn.Module + optim"]})
+    results["val_RMSE"] = [rmse(p_val["actual"], y_mean)] + [rmse(p_val["actual"], p_val[c]) for c in ("sklearn", "manual", "nn_module")]
+    results["test_RMSE"] = [rmse(p_test["actual"], y_mean)] + [rmse(p_test["actual"], p_test[c]) for c in ("sklearn", "manual", "nn_module")]
+    results["test_MAE"] = [mae(p_test["actual"], y_mean)] + [mae(p_test["actual"], p_test[c]) for c in ("sklearn", "manual", "nn_module")]
+    print()
+    print(results.round(0).to_string(index=False))
+
+        # Do the three agree? Compare their predictions and weights
+    gap = lambda a, b: float(np.max(np.abs(p_test[a] - p_test[b])))
+    g1, g2, g3 = gap("sklearn", "manual"), gap("sklearn", "nn_module"), gap("manual", "nn_module")
+    print("max |test prediction gap| in $: sklearn-manual %.0f, sklearn-nn %.0f, manual-nn %.0f" % (g1, g2, g3))
+    w_gap = float(np.max(np.abs(sk_model.coef_ - w_man.numpy().ravel())))
+    print("max |weight gap| (standardised units): sklearn-manual %.4f" % w_gap)
+
+    meta = {"y_mean": y_mean, "y_std": y_std, "alpha": best_alpha, "lr": LR, "epochs": EPOCHS,
+            "n_features": int(A_train.shape[1]), "split": "train<=2008, val=2009, test=2010"}
+    save_artifacts(pre, sk_model, w_man, b_man, nn_model, meta, predictions, results)
+    print("Saved models and results to", ARTIFACT_DIR)
+
     
