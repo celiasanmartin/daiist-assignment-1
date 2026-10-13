@@ -278,6 +278,7 @@ if __name__ == "__main__":
     meta = {"y_mean": y_mean, "y_std": y_std, "alpha": best_alpha, "lr": LR, "epochs": EPOCHS,
             "n_features": int(A_train.shape[1]), "split": "train<=2008, val=2009, test=2010"}
     save_artifacts(pre, sk_model, w_man, b_man, nn_model, meta, predictions, results)
+    np.savez(ARTIFACT_DIR / "matrices.npz", A_val=A_val, A_test=A_test, y_val=y_val.to_numpy(), y_test=y_test.to_numpy())
     print("Saved models and results to", ARTIFACT_DIR)
 
     
