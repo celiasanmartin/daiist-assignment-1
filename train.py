@@ -62,13 +62,27 @@ def engineer_features(df):
                             "TotalBsmtSF", "1stFlrSF", "2ndFlrSF",
                             "FullBath", "HalfBath", "BsmtFullBath", "BsmtHalfBath"])
 
+QUALITY_COLS = ["ExterQual", "ExterCond", "BsmtQual", "BsmtCond", "HeatingQC",
+                "KitchenQual", "FireplaceQu", "GarageQual", "GarageCond", "PoolQC"]
+QUALITY_MAP = {"None": 0, "Po": 1, "Fa": 2, "TA": 3, "Gd": 4, "Ex": 5}
+
+
+def encode_quality(df):
+    """Turn the quality scales (None < Po < Fa < TA < Gd < Ex) into 0-5."""
+    df = df.copy()
+    for col in QUALITY_COLS:
+        df[col] = df[col].map(QUALITY_MAP)
+    return df
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
     stats = fit_cleaning(train)
     train, val, test = (apply_cleaning(d, stats) for d in (train, val, test))
     train, val, test = (engineer_features(d) for d in (train, val, test))
+    train, val, test = (encode_quality(d) for d in (train, val, test))
     for name, d in (("train", train), ("val", val), ("test", test)):
         na = d.isna().sum()
         print(name, "remaining missing:", na[na > 0].to_dict())
-    print("columns after feature engineering (incl. SalePrice):", train.shape[1])
+    print("columns (incl. SalePrice):", train.shape[1])
+    print("KitchenQual values:", sorted(train["KitchenQual"].unique().tolist()))
