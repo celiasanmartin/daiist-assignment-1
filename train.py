@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 DATA_PATH = "data/ames.csv"
@@ -97,6 +98,13 @@ def fit_preprocessor(X_train):
     ])
     return pre.fit(X_train)
 
+ALPHAS = [1, 3, 10, 30, 100, 300]
+
+
+def rmse(y_true, y_pred):
+    """Root mean squared error, in dollars."""
+    return float(np.sqrt(np.mean((np.asarray(y_true) - np.asarray(y_pred)) ** 2)))
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
@@ -107,5 +115,21 @@ if __name__ == "__main__":
     (X_train, y_train), (X_val, y_val), (X_test, y_test) = (split_xy(d) for d in (train, val, test))
     pre = fit_preprocessor(X_train)
     A_train, A_val, A_test = (pre.transform(X) for X in (X_train, X_val, X_test))
-    print("model matrices:", A_train.shape, A_val.shape, A_test.shape)
-    print("any NaN:", bool(np.isnan(A_train).any() or np.isnan(A_val).any() or np.isnan(A_test).any()))
+
+    # The target is standardised with TRAIN statistics; all three models learn on this scale
+    y_mean, y_std = float(np.mean(y_train)), float(np.std(y_train))
+    ys_train = (y_train.to_numpy() - y_mean) / y_std
+
+    # Naive baseline: always predict the average training price
+    print("baseline RMSE  val: %.0f  test: %.0f" % (rmse(y_val, y_mean), rmse(y_test, y_mean)))
+
+    # scikit-learn Ridge: choose alpha on validation only
+    scores = {}
+    for alpha in ALPHAS:
+        model = Ridge(alpha=alpha).fit(A_train, ys_train)
+        scores[alpha] = rmse(y_val, model.predict(A_val) * y_std + y_mean)
+        print("  alpha=%-4s val RMSE: %.0f" % (alpha, scores[alpha]))
+    best_alpha = min(scores, key=scores.get)
+    sk_model = Ridge(alpha=best_alpha).fit(A_train, ys_train)
+    sk_test = rmse(y_test, sk_model.predict(A_test) * y_std + y_mean)
+    print("scikit-learn Ridge (alpha=%s)  val: %.0f  test: %.0f" % (best_alpha, scores[best_alpha], sk_test))
