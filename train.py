@@ -42,11 +42,33 @@ def apply_cleaning(df, stats):
     return df
 
 
+def engineer_features(df):
+    """Create new features and drop the columns they replace."""
+    df = df.copy()
+    # Age of the house and of the last remodel, measured at the time of sale
+    df["HouseAge"] = df["YrSold"] - df["YearBuilt"]
+    df["RemodAge"] = (df["YrSold"] - df["YearRemodAdd"]).clip(lower=0)
+    # Total living area and total bathrooms (half baths count 0.5)
+    df["TotalSF"] = df["TotalBsmtSF"] + df["1stFlrSF"] + df["2ndFlrSF"]
+    df["TotalBath"] = (df["FullBath"] + 0.5 * df["HalfBath"]
+                       + df["BsmtFullBath"] + 0.5 * df["BsmtHalfBath"])
+    # Yes/no indicators
+    df["HasPool"] = (df["PoolArea"] > 0).astype(int)
+    df["HasGarage"] = (df["GarageType"] != "None").astype(int)
+    df["HasFireplace"] = (df["Fireplaces"] > 0).astype(int)
+    df["HasBasement"] = (df["TotalBsmtSF"] > 0).astype(int)
+    # Drop the originals used above (and YrSold, see note)
+    return df.drop(columns=["YrSold", "YearBuilt", "YearRemodAdd",
+                            "TotalBsmtSF", "1stFlrSF", "2ndFlrSF",
+                            "FullBath", "HalfBath", "BsmtFullBath", "BsmtHalfBath"])
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
     stats = fit_cleaning(train)
     train, val, test = (apply_cleaning(d, stats) for d in (train, val, test))
+    train, val, test = (engineer_features(d) for d in (train, val, test))
     for name, d in (("train", train), ("val", val), ("test", test)):
         na = d.isna().sum()
         print(name, "remaining missing:", na[na > 0].to_dict())
+    print("columns after feature engineering (incl. SalePrice):", train.shape[1])
