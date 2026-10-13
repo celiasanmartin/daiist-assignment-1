@@ -1,6 +1,7 @@
 """Assignment 1 - training pipeline (step 1: split and cleaning)."""
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -105,6 +106,35 @@ def rmse(y_true, y_pred):
     """Root mean squared error, in dollars."""
     return float(np.sqrt(np.mean((np.asarray(y_true) - np.asarray(y_pred)) ** 2)))
 
+LR = 0.02
+EPOCHS = 10000
+
+
+def train_manual(A, ys, alpha, lr, epochs):
+    """Ridge regression by gradient descent, written by hand with raw tensors and autograd."""
+    X = torch.tensor(A, dtype=torch.float32)
+    y = torch.tensor(ys, dtype=torch.float32).reshape(-1, 1)
+    n, d = X.shape
+    w = torch.zeros(d, 1, requires_grad=True)
+    b = torch.zeros(1, requires_grad=True)
+    for epoch in range(epochs):
+        pred = X @ w + b
+        loss = ((pred - y) ** 2).mean() + (alpha / n) * (w ** 2).sum()
+        loss.backward()                  # autograd computes the gradients
+        with torch.no_grad():            # manual gradient step (no optimizer)
+            w -= lr * w.grad
+            b -= lr * b.grad
+        w.grad.zero_()
+        b.grad.zero_()
+        if (epoch + 1) % 2000 == 0:
+            print("    epoch %5d  loss %.4f" % (epoch + 1, loss.item()))
+    return w.detach(), b.detach()
+
+
+def predict_linear(A, w, b):
+    """Predictions in the standardised scale."""
+    return (torch.tensor(A, dtype=torch.float32) @ w + b).numpy().ravel()
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
@@ -133,3 +163,10 @@ if __name__ == "__main__":
     sk_model = Ridge(alpha=best_alpha).fit(A_train, ys_train)
     sk_test = rmse(y_test, sk_model.predict(A_test) * y_std + y_mean)
     print("scikit-learn Ridge (alpha=%s)  val: %.0f  test: %.0f" % (best_alpha, scores[best_alpha], sk_test))
+
+    # Manual PyTorch: same Ridge penalty (alpha chosen above), trained by gradient descent
+    print("manual PyTorch loop (lr=%s, %s epochs):" % (LR, EPOCHS))
+    w_man, b_man = train_manual(A_train, ys_train, best_alpha, LR, EPOCHS)
+    man_val = rmse(y_val, predict_linear(A_val, w_man, b_man) * y_std + y_mean)
+    man_test = rmse(y_test, predict_linear(A_test, w_man, b_man) * y_std + y_mean)
+    print("manual PyTorch  val: %.0f  test: %.0f" % (man_val, man_test))
