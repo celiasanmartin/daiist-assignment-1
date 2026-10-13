@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -135,6 +136,49 @@ def predict_linear(A, w, b):
     """Predictions in the standardised scale."""
     return (torch.tensor(A, dtype=torch.float32) @ w + b).numpy().ravel()
 
+class RidgeRegression(nn.Module):
+    """A single linear layer: prediction = X @ w + b."""
+
+    def __init__(self, n_features):
+        super().__init__()
+        self.linear = nn.Linear(n_features, 1)
+        nn.init.zeros_(self.linear.weight)
+        nn.init.zeros_(self.linear.bias)
+
+    def forward(self, x):
+        return self.linear(x)
+
+
+def train_module(A, ys, alpha, lr, epochs):
+    """Same model as train_manual, with nn.Module, nn.MSELoss and torch.optim.SGD."""
+    X = torch.tensor(A, dtype=torch.float32)
+    y = torch.tensor(ys, dtype=torch.float32).reshape(-1, 1)
+    n, d = X.shape
+    model = RidgeRegression(d)
+    loss_fn = nn.MSELoss()
+    # weight_decay = 2*alpha/n gives exactly the Ridge penalty (alpha/n)*||w||^2; the bias is not penalised
+    optimizer = torch.optim.SGD(
+        [{"params": model.linear.weight, "weight_decay": 2 * alpha / n},
+         {"params": model.linear.bias, "weight_decay": 0.0}],
+        lr=lr,
+    )
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        loss = loss_fn(model(X), y)
+        loss.backward()
+        optimizer.step()
+        if (epoch + 1) % 2000 == 0:
+            total = loss.item() + (alpha / n) * model.linear.weight.pow(2).sum().item()
+            print("    epoch %5d  loss %.4f" % (epoch + 1, total))
+    return model
+
+
+def predict_module(model, A):
+    """Predictions in the standardised scale."""
+    model.eval()
+    with torch.no_grad():
+        return model(torch.tensor(A, dtype=torch.float32)).numpy().ravel()
+
 if __name__ == "__main__":
     train, val, test = load_and_split()
     print("train / val / test:", len(train), len(val), len(test))
@@ -170,3 +214,11 @@ if __name__ == "__main__":
     man_val = rmse(y_val, predict_linear(A_val, w_man, b_man) * y_std + y_mean)
     man_test = rmse(y_test, predict_linear(A_test, w_man, b_man) * y_std + y_mean)
     print("manual PyTorch  val: %.0f  test: %.0f" % (man_val, man_test))
+
+    # Standard PyTorch workflow: nn.Module + nn.MSELoss + torch.optim.SGD
+    print("nn.Module + torch.optim (lr=%s, %s epochs):" % (LR, EPOCHS))
+    nn_model = train_module(A_train, ys_train, best_alpha, LR, EPOCHS)
+    nn_val = rmse(y_val, predict_module(nn_model, A_val) * y_std + y_mean)
+    nn_test = rmse(y_test, predict_module(nn_model, A_test) * y_std + y_mean)
+    print("nn.Module       val: %.0f  test: %.0f" % (nn_val, nn_test))
+    
